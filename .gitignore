@@ -1,2 +1,5 @@
 .env
+*.swp
+logs/
 __pycache__/
+secrets/

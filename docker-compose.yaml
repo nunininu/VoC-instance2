@@ -1,26 +1,29 @@
 x-airflow-common:
   &airflow-common
-  # image: ${AIRFLOW_IMAGE_NAME:-apache/airflow:3.0.1}
   build: .
+  # image: apache/airflow:2.10.4
   environment:
     &airflow-common-env
-    AIRFLOW__CORE__EXECUTOR: LocalExecutor
-    AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+    AIRFLOW__CORE__EXECUTOR: CeleryExecutor
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres/airflow
+    AIRFLOW__CELERY__BROKER_URL: redis://:@redis:6379/0
     AIRFLOW__CORE__FERNET_KEY: ''
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+    AIRFLOW__CORE__DAGBAG_IMPORT_TIMEOUT: 60
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
-    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: 'http://airflow-apiserver:8080/execution/'
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
-    AIRFLOW_CONFIG: '/opt/airflow/config/airflow.cfg'
+    AIRFLOW__LOGGING__WORKER_LOG_SERVER_HOST: "airflow-worker:8793"
   volumes:
     - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
     - ${AIRFLOW_PROJ_DIR:-.}/logs:/opt/airflow/logs
-    - ${AIRFLOW_PROJ_DIR:-.}/config:/opt/airflow/config
     - ${AIRFLOW_PROJ_DIR:-.}/plugins:/opt/airflow/plugins
+    - ${AIRFLOW_PROJ_DIR:-.}/secrets:/opt/airflow/secrets:ro
   user: "${AIRFLOW_UID:-50000}:0"
   depends_on:
     &airflow-common-depends-on
+    redis:
+      condition: service_healthy
     postgres:
       condition: service_healthy
 
@@ -45,18 +48,30 @@ services:
           cpus: "0.1"
           memory: 512m
 
-  airflow-apiserver:
+  redis:
+    image: redis:7.2-bookworm
+    expose:
+      - 6379
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 30s
+      retries: 50
+      start_period: 30s
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: "0.1"
+          memory: 512m
+
+  airflow-webserver:
     <<: *airflow-common
-    command: api-server
+    command: webserver
     ports:
       - "8080:8080"
-    environment:
-      <<: *airflow-common-env
-      AIRFLOW__WEBSERVER__WORKERS: 1
-      _AIRFLOW__WWW_USER_USERNAME: airflow
-      _AIRFLOW__WWW_USER_PASSWORD: airflow
     healthcheck:
-      test: ["CMD", "curl", "--fail", "http://localhost:8080/api/v2/version"]
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -69,8 +84,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.4"
-          memory: 1.5G
+          cpus: "0.8"
+          memory: 3G
 
   airflow-scheduler:
     <<: *airflow-common
@@ -92,15 +107,20 @@ services:
           cpus: "0.3"
           memory: 1G
 
-  airflow-dag-processor:
+  airflow-worker:
     <<: *airflow-common
-    command: dag-processor
+    command: celery worker
     healthcheck:
-      test: ["CMD-SHELL", 'airflow jobs check --job-type DagProcessorJob --hostname "$${HOSTNAME}"']
+      test:
+        - "CMD-SHELL"
+        - 'celery --app airflow.providers.celery.executors.celery_executor.app inspect ping -d "celery@$${HOSTNAME}" || celery --app airflow.executors.celery_executor.app inspect ping -d "celery@$${HOSTNAME}"'
       interval: 30s
       timeout: 10s
       retries: 5
       start_period: 30s
+    environment:
+      <<: *airflow-common-env
+      DUMB_INIT_SETSID: "0"
     restart: always
     depends_on:
       <<: *airflow-common-depends-on
@@ -109,8 +129,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.2"
-          memory: 1G
+          cpus: "0.4"
+          memory: 1.2G
 
   airflow-init:
     <<: *airflow-common
@@ -202,43 +222,55 @@ services:
       _PIP_ADDITIONAL_REQUIREMENTS: ''
     user: "0:0"
 
+  cloudsql-proxy:
+    image: gcr.io/cloudsql-docker/gce-proxy:1.33.6
+    command: >
+      /cloud_sql_proxy
+      -dir=/cloudsql
+      -instances=vocabulary-459105:asia-northeast3:voc-cloud-sql=tcp:5432
+      -credential_file=/secrets/vocabulary-459105-5603cb550881.json
+    volumes:
+      - ./secrets:/secrets/:ro
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: "0.2"
+          memory: 256m
+
   spark-master:
     image: bitnami/spark:3.4
     container_name: spark-master
     environment:
       - SPARK_MODE=master
-      - SPARK_RPC_AUTHENTICATION_ENABLED=no
-      - SPARK_RPC_ENCRYPTION_ENABLED=no
-      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
-      - SPARK_SSL_ENABLED=no
       - SPARK_MASTER_PORT=7077
       - SPARK_MASTER_WEBUI_PORT=8081
     ports:
       - "7077:7077"
       - "8081:8081"
+    restart: always
     deploy:
       resources:
         limits:
           cpus: "0.5"
-          memory: 1.5g
-    restart: always
+          memory: 1.5G
 
-  spark-worker:
-    image: bitnami/spark:3.4
-    container_name: spark-worker
-    environment:
-      - SPARK_MODE=worker
-      - SPARK_MASTER_URL=spark://spark-master:7077
-      - SPARK_WORKER_MEMORY=2g
-      - SPARK_WORKER_CORES=1
-    depends_on:
-      - spark-master
-    deploy:
-      resources:
-        limits:
-          cpus: "0.5"
-          memory: 2g
-    restart: always
+  # spark-worker:
+  # image: bitnami/spark:3.4
+  # container_name: spark-worker
+  # environment:
+  #   - SPARK_MODE=worker
+  #   - SPARK_MASTER_URL=spark://spark-master:7077
+  #   - SPARK_WORKER_MEMORY=2g
+  #   - SPARK_WORKER_CORES=1
+  # depends_on:
+  #   - spark-master
+  # restart: always
+  # deploy:
+  #   resources:
+  #     limits:
+  #       cpus: "0.5"
+  #       memory: 2G
 
 volumes:
   postgres-db-volume:
