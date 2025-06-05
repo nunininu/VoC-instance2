@@ -23,7 +23,7 @@ def check_files_exist(**context):
     year = context["logical_date"].year
     month = context["logical_date"].month
     gcs_hook = GCSHook(gcp_conn_id="google_cloud_default")
-    logging.info(f"GCS Hook 연결 완료: {gs_hook.project_id}")
+    logging.info(f"GCS Hook 연결 완료: {gcs_hook.project_id}")
     
     paths = [
         # f"{BASE_PATH}/consultings/year={year}/month={month}",
@@ -85,7 +85,7 @@ with DAG(
 
     spark_agg = SparkSubmitOperator(
         task_id="spark_monthly_agg",
-        application="opt/airflow/spark_jobs/voc_monthly_aggregation.py",
+        application="opt/airflow/spark_jobs/monthly_agg.py",
         conn_id="spark_default",
         application_args=[
             "--year", "{{ logical_date.year }}",

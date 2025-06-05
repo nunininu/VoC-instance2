@@ -14,6 +14,9 @@ x-airflow-common:
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
     AIRFLOW__LOGGING__WORKER_LOG_SERVER_HOST: "airflow-worker:8793"
+    AIRFLOW__LOGGING__LOGGING_LEVEL: 'DEBUG'
+    AIRFLOW__CELERY__WORKER_LOG_LEVEL: 'DEBUG'
+    AIRFLOW__WEBSERVER__SECRET_KEY: "airflow_spark_docker"
   volumes:
     - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
     - ${AIRFLOW_PROJ_DIR:-.}/logs:/opt/airflow/logs
@@ -108,7 +111,9 @@ services:
           memory: 1G
 
   airflow-worker:
-    <<: *airflow-common
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
     command: celery worker
     healthcheck:
       test:
@@ -120,7 +125,15 @@ services:
       start_period: 30s
     environment:
       <<: *airflow-common-env
+      AIRFLOW__CELERY__WORKER_CONCURRENCY: 2
+      AIRFLOW__CELERY__WORKER_PREFETCH_MULTIPLIER: 1
       DUMB_INIT_SETSID: "0"
+    volumes:
+      - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
+      - ${AIRFLOW_PROJ_DIR:-.}/logs:/opt/airflow/logs
+      - ${AIRFLOW_PROJ_DIR:-.}/plugins:/opt/airflow/plugins
+      - ${AIRFLOW_PROJ_DIR:-.}/secrets:/opt/airflow/secrets:ro
+      - ./spark_jobs:/opt/spark_jobs
     restart: always
     depends_on:
       <<: *airflow-common-depends-on
