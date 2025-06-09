@@ -1,13 +1,9 @@
-# 멀티2 Repo
-### 1. for Airflow 
-```bash
+# Instance-2 Repository
 
-```
-
-### 2. for Spark
-```bash
-
-```
+## 구성
+- Docker compose
+- Airflow
+- Spark
 
 
 # 참고: 본진 Repo Wiki 
