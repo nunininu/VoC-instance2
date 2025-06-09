@@ -1,0 +1,23 @@
+FROM apache/airflow:2.10.4
+
+USER root
+
+ENV SPARK_VERSION=3.4.1 \
+    HADOOP_VERSION=3 \
+    JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+
+RUN apt-get update && apt-get install -y \
+    openjdk-17-jdk \
+    curl \
+    wget \
+    procps \
+ && apt-get clean
+
+RUN wget https://archive.apache.org/dist/spark/spark-${SPARK_VERSION}/spark-${SPARK_VERSION}-bin-hadoop${HADOOP_VERSION}.tgz && \
+    tar -xzf spark-${SPARK_VERSION}-bin-hadoop${HADOOP_VERSION}.tgz -C /opt && \
+    rm spark-${SPARK_VERSION}-bin-hadoop${HADOOP_VERSION}.tgz && \
+    ln -s /opt/spark-${SPARK_VERSION}-bin-hadoop${HADOOP_VERSION} /opt/spark
+
+ENV PATH="/opt/spark/bin:$PATH"
+
+USER airflow
