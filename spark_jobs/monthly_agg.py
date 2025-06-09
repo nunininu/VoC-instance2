@@ -7,7 +7,7 @@ def main(year, month, consult_path, result_path, output_path):
 
     # 1. 데이터 불러오기
     # consult_df = spark.read.parquet(f"{consult_path}/year={year}/month={month}")
-    result_df = spark.read.parquet(f"{result_path}/year={year}/month={month}")
+    # result_df = spark.read.parquet(f"{result_path}/year={year}/month={month}")
 
     # 2. 조인 (consulting_id 기준)
     # df = result_df.join(
@@ -42,18 +42,18 @@ def main(year, month, consult_path, result_path, output_path):
     # sentiment_agg.write.mode("overwrite").partitionBy("year", "month").parquet(f"{output_path}/sentiment")
     
     # ---- 테스트용 -----
-    result_df = result_df.withColumn("year", lit(year)).withColumn("month", lit(month))
-    df_keywords = result_df.withColumn("keyword", explode(split(col("keywords"), ",")))
-    keyword_agg = df_keywords.groupBy("keyword", "year", "month").agg(
-        count("*").alias("count")
-    )
-    sentiment_agg = result_df.groupBy("year", "month").agg(
-        avg("positive").alias("avg_positive"),
-        avg("negative").alias("avg_negative")
-    )
-    keyword_agg.write.mode("overwrite").partitionBy("year", "month").parquet(f"{output_path}/keyword")
-    sentiment_agg.write.mode("overwrite").partitionBy("year", "month").parquet(f"{output_path}/sentiment")
-
+    # result_df = result_df.withColumn("year", lit(year)).withColumn("month", lit(month))
+    # df_keywords = result_df.withColumn("keyword", explode(split(col("keywords"), ",")))
+    # keyword_agg = df_keywords.groupBy("keyword", "year", "month").agg(
+    #     count("*").alias("count")
+    # )
+    # sentiment_agg = result_df.groupBy("year", "month").agg(
+    #     avg("positive").alias("avg_positive"),
+    #     avg("negative").alias("avg_negative")
+    # )
+    # keyword_agg.write.mode("overwrite").partitionBy("year", "month").parquet(f"{output_path}/keyword")
+    # sentiment_agg.write.mode("overwrite").partitionBy("year", "month").parquet(f"{output_path}/sentiment")
+    print("spark test")
     spark.stop()
 
 if __name__ == "__main__":
