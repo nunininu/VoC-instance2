@@ -18,7 +18,16 @@ BUCKET = "wh04-voc-bucket"
 BASE_PATH = "meta"
 
 # ----- 유틸 함수 -----
-def check_files_exist(**context):
+def check_files_exist(**context) -> bool:
+    """
+    S3에 파일이 존재하는지 확인
+    
+    Args:  
+        context (dict): task 내부 내용
+    
+    Returns:  
+        (bool): 파일 존재 여부
+    """
     from airflow.providers.amazon.aws.hooks.s3 import S3Hook
     year = context["logical_date"].year
     month = context["logical_date"].month
@@ -36,7 +45,16 @@ def check_files_exist(**context):
             return False
     return True
 
-def generate_sql(**context):
+def generate_sql(**context) -> str:
+    """
+    XCom으로 넘길 sql 쿼리문 작성
+    
+    Args:  
+        context (dict): task 내부 내용
+    
+    Returns:
+        (str): 쿼리문
+    """
     from io import BytesIO
     import pandas as pd
     from airflow.providers.amazon.aws.hooks.s3 import S3Hook
@@ -74,12 +92,14 @@ with DAG(
     max_active_runs=1,
     max_active_tasks=1
 ) as dag:
+    # 1번 task: 파일 존재 여부 체크
     check_data = ShortCircuitOperator(
         task_id="check_data",
         python_callable=check_files_exist,
         provide_context=True
     )
 
+    # 2번 task: Spark을 통해 한 달치 데이터 집계
     spark_agg = SparkSubmitOperator(
         task_id="spark_monthly_agg",
         application="/opt/spark_jobs/monthly_agg.py",
@@ -94,12 +114,14 @@ with DAG(
         verbose=True
     )
 
+    # 3번 task: RDS에 실행할 쿼리문 작성
     prepare_sql = PythonOperator(
         task_id="prepare_sql",
         python_callable=generate_sql,
         provide_context=True
     )
 
+    # 4번 task: RDS에 쿼리문 실행
     save_to_rds = PostgresOperator(
         task_id="save_to_rds",
         postgres_conn_id="aws_postgres_conn",
