@@ -1,6 +1,8 @@
 import logging
+import os
 from datetime import datetime, timedelta
 
+from dotenv import load_dotenv
 from airflow import DAG
 from airflow.operators.python import ShortCircuitOperator, PythonOperator
 from airflow.providers.apache.spark.operators.spark_submit import SparkSubmitOperator
@@ -14,8 +16,12 @@ logging.basicConfig(
 logger = logging.getLogger("monthly_agg")
 
 # ----- 공통 클라이언트 -----
+load_dotenv("/opt/airflow/.env")
 BUCKET = "wh04-voc-bucket"
 BASE_PATH = "meta"
+AWS_ACCESS_KEY = os.getenv("AWS_ACCESS_KEY_ID")
+AWS_SECRET_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
+AWS_S3_ENDPOINT = os.getenv("AWS_S3_ENDPOINT")
 
 # ----- 유틸 함수 -----
 def check_files_exist(**context) -> bool:
@@ -35,11 +41,12 @@ def check_files_exist(**context) -> bool:
     logging.info(f"S3 연결 완료")
 
     paths = [
-        f"{BASE_PATH}/consultings/year={year}/month={month}",
-        f"{BASE_PATH}/analysis_result/year={year}/month={month}"
+        f"{BASE_PATH}/consultings/year={year}/month={'%02d' % month}/",
+        f"{BASE_PATH}/analysis_result/year={year}/month={'%02d' % month}/"
     ]
 
     for path in paths:
+        logging.info(f"경로 체크중... {path}")
         files = s3_hook.list_keys(bucket_name=BUCKET, prefix=path)
         if not files:
             return False
@@ -55,6 +62,7 @@ def generate_sql(**context) -> str:
     Returns:
         (str): 쿼리문
     """
+    import uuid
     from io import BytesIO
     import pandas as pd
     from airflow.providers.amazon.aws.hooks.s3 import S3Hook
@@ -64,17 +72,27 @@ def generate_sql(**context) -> str:
 
     sql = []
     for kind in ["category", "keyword"]:
-        path = f"{BASE_PATH}/agg/{kind}/year={year}/month={month}"
+        path = f"{BASE_PATH}/agg/{kind}/year={year}/month={'%02d' % month}/"
+        logger.info(f"경로 탐색중: {path}")
         files = s3_hook.list_keys(bucket_name=BUCKET, prefix=path)
 
         for obj in files:
-            data = s3_hook.download(bucket_name=BUCKET, object_name=obj)
+            s3_obj = s3_hook.get_key(key=obj, bucket_name=BUCKET)
+            data = s3_obj.get()["Body"].read()
             df = pd.read_parquet(BytesIO(data))
 
             for _, raw in df.iterrows():
+                col = "category_id" if kind == "category" else "keyword"
+                if kind == "category":
+                    val_str = str(raw["category_id"])
+                    val_sql = val_str
+                else:
+                    val_str = raw["keyword"].replace("'","''")
+                    val_sql = f"'{val_str}'"
+
                 sql.append(f"""
-                INSERT INTO {kind}_agg ({kind}_agg_id, {kind}, count, year, month)
-                VALUES ('{raw['analysis_result_id']}', '{raw[kind]}', {raw['count']}, {year}, {month});
+                INSERT INTO {kind}_agg ({kind}_agg_id, {col}, count, year, month)
+                VALUES ('{str(uuid.uuid4())}', {val_sql}, {raw['count']}, {year}, {month});
                 """)
     return "\n".join(sql)
 
@@ -107,10 +125,33 @@ with DAG(
         application_args=[
             "--year", "{{ logical_date.year }}",
             "--month", "{{ '%02d' % logical_date.month }}",
-            "--consult_path", f"{BASE_PATH}/consultings",
-            "--result_path", f"{BASE_PATH}/analysis_result",
-            "--output_path", f"{BASE_PATH}/agg"
+            "--consult_path", f"s3a://{BUCKET}/{BASE_PATH}/consultings",
+            "--result_path", f"s3a://{BUCKET}/{BASE_PATH}/analysis_result",
+            "--output_path", f"s3a://{BUCKET}/{BASE_PATH}/agg"
         ],
+        conf={
+            "spark.driver.host": "3.38.223.1",
+            "spark.driver.bindAddress": "0.0.0.0",
+            "spark.driver.port": "36000",
+            "spark.blockManager.port": "36010",
+            "spark.sql.parquet.int96RebaseModeInRead": "LEGACY",
+            "spark.sql.parquet.datetimeRebaseModeInRead": "LEGACY",
+            "spark.sql.parquet.enableVectorizedReader": "false",
+            "spark.sql.parquet.filterPushdown": "true",
+            "spark.hadoop.fs.s3a.connection.maximum": "100",
+            "spark.hadoop.fs.s3a.threads.max": "20",
+            "spark.sql.shuffle.partitions": "4",
+            "spark.executor.memory": "1g",
+            "spark.executor.cores": "1",
+            "spark.driver.memory": "1g",
+            "spark.driver.cores": "1",
+            "spark.hadoop.fs.s3a.access.key": AWS_ACCESS_KEY,
+            "spark.hadoop.fs.s3a.secret.key": AWS_SECRET_KEY,
+            "spark.hadoop.fs.s3a.endpoint": AWS_S3_ENDPOINT,
+            "spark.hadoop.fs.s3a.path.style.access": "true",
+            "spark.hadoop.fs.s3a.impl": "org.apache.hadoop.fs.s3a.S3AFileSystem",
+            "spark.jars": "/opt/spark/jars/hadoop-aws-3.3.2.jar,/opt/spark/jars/aws-java-sdk-bundle-1.11.1026.jar",
+        },
         verbose=True
     )
 

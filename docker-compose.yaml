@@ -24,6 +24,7 @@ x-airflow-common:
     - ${AIRFLOW_PROJ_DIR:-.}/logs:/opt/airflow/logs
     - ${AIRFLOW_PROJ_DIR:-.}/plugins:/opt/airflow/plugins
     - ${AIRFLOW_PROJ_DIR:-.}/secrets:/opt/airflow/secrets:ro
+    - ${AIRFLOW_PROJ_DIR:-.}/.env:/opt/airflow/.env:ro
   user: "${AIRFLOW_UID:-50000}:0"
   depends_on:
     &airflow-common-depends-on
@@ -117,6 +118,9 @@ services:
       context: .
       dockerfile: Dockerfile.worker
     command: celery worker
+    ports:
+      - "36000:36000"
+      - "36010:36010"
     healthcheck:
       test:
         - "CMD-SHELL"
@@ -135,6 +139,7 @@ services:
       - ${AIRFLOW_PROJ_DIR:-.}/logs:/opt/airflow/logs
       - ${AIRFLOW_PROJ_DIR:-.}/plugins:/opt/airflow/plugins
       - ${AIRFLOW_PROJ_DIR:-.}/secrets:/opt/airflow/secrets:ro
+      - ${AIRFLOW_PROJ_DIR:-.}/.env:/opt/airflow/.env:ro
       - ./spark_jobs:/opt/spark_jobs
     restart: always
     depends_on:
