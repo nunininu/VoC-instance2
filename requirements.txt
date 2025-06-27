@@ -1,6 +1,8 @@
 apache-airflow-providers-standard
-apache-airflow-providers-google
+apache-airflow-providers-amazon
+apache-airflow-providers-postgres
 apache-airflow-providers-apache-spark
 pyspark==3.5.1
+python-dotenv
 pandas
 pendulum

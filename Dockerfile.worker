@@ -2,7 +2,7 @@ FROM apache/airflow:2.10.4
 
 USER root
 
-ENV SPARK_VERSION=3.4.1 \
+ENV SPARK_VERSION=3.4.3 \
     HADOOP_VERSION=3 \
     JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
 
@@ -20,4 +20,11 @@ RUN wget https://archive.apache.org/dist/spark/spark-${SPARK_VERSION}/spark-${SP
 
 ENV PATH="/opt/spark/bin:$PATH"
 
+RUN mkdir -p /opt/spark/jars && \
+    wget -O /opt/spark/jars/hadoop-aws-3.3.2.jar https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.3.2/hadoop-aws-3.3.2.jar && \
+    wget -O /opt/spark/jars/aws-java-sdk-bundle-1.11.1026.jar https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.11.1026/aws-java-sdk-bundle-1.11.1026.jar
+
 USER airflow
+
+COPY requirements.txt /requirements.txt
+RUN pip install --no-cache-dir -r /requirements.txt
